@@ -507,35 +507,89 @@ class FeatureSpace(Layer):
 
     def adapt(self, dataset):
         if not isinstance(dataset, tf.data.Dataset):
-            raise ValueError(
-                "`adapt()` can only be called on a tf.data.Dataset. "
-                f"Received instead: {dataset} (of type {type(dataset)})"
-            )
+            try:
+                for name in self._list_adaptable_preprocessors():
+                    # call adapt() on each individual adaptable layer.
 
-        for name in self._list_adaptable_preprocessors():
-            # Call adapt() on each individual adaptable layer.
+                    # TODO: map x[name] to iterable
+                    if isinstance(dataset, dict):
+                        feature_dataset = {k: map(lambda x: x[name], v) for k, v in dataset.items()}
+                        preprocessor = self.preprocessors[name]
+                        x = next(iter(feature_dataset.values()))
+                    else:
+                        feature_dataset = map(lambda x: x[name], dataset)
+                        preprocessor = self.preprocessors[name]
+                        x = next(iter(feature_dataset))
 
-            # TODO: consider rewriting this to instead iterate on the
-            # dataset once, split each batch into individual features,
-            # and call the layer's `_adapt_function` on each batch
-            # to simulate the behavior of adapt() in a more performant fashion.
+                    from collections.abc import Iterable 
+                    def get_iterable_shape(iterable):
+                        if not isinstance(iterable, Iterable):
+                            return []
+                        
+                        shape = [len(iterable)]
+                        shape.extend(get_iterable_shape(next(iterable)))
 
-            feature_dataset = dataset.map(lambda x: x[name])
-            preprocessor = self.preprocessors[name]
-            # TODO: consider adding an adapt progress bar.
-            # Sample 1 element to check the rank
-            x = next(iter(feature_dataset))
-            if len(x.shape) == 0:
-                # The dataset yields unbatched scalars; batch it.
-                feature_dataset = feature_dataset.batch(32)
-            if len(x.shape) in {0, 1}:
-                # If the rank is 1, add a dimension
-                # so we can reduce on axis=-1.
-                # Note: if rank was previously 0, it is now 1.
-                feature_dataset = feature_dataset.map(
-                    lambda x: tf.expand_dims(x, -1)
-                )
-            preprocessor.adapt(feature_dataset)
+                    def get_iterable_shape(iterable):
+                        shape = [len(iterable)]
+                        for elem in iterable:
+                            if isinstance(elem, Iterable):
+                                shape.append(len(elem))
+                        return shape
+
+                    if len(x.shape) == 0:
+                        # The datasert yields unbatched scalars; batch it.
+                        def _batcher(dataset, batch_size=32):
+                            batch = []
+                            for x in dataset:
+                                batch.append(x)
+                                if len(batch) == batch_size:
+                                    yield tf.stack(batch)
+                                    batch = []
+                            if batch:
+                                yield tf.stack(batch)
+
+                        feature_dataset = _batcher(feature_dataset, batch_size=32)
+                    if len(x.shape) in {0, 1}:
+                        # If the rank is 1, add a dimension
+                        # so we can reduce on axis=-1.
+                        # Note: if rank was previously 0, it is now 1.
+                        feature_dataset = map(
+                            lambda x: tf.expand_dims(x, -1), feature_dataset
+                        )
+                    preprocessor.adapt(feature_dataset)
+
+            except Exception as e:
+#                raise ValueError(
+#                    "`adapt()` can only be called on a tf.data.Dataset. "
+#                    f"Received instead: {dataset} (of type {type(dataset)})"
+#                )
+                raise e from e
+        else:
+            for name in self._list_adaptable_preprocessors():
+                # Call adapt() on each individual adaptable layer.
+
+                # TODO: consider rewriting this to instead iterate on the
+                # dataset once, split each batch into individual features,
+                # and call the layer's `_adapt_function` on each batch
+                # to simulate the behavior of adapt() in a more performant fashion.
+
+                feature_dataset = dataset.map(lambda x: x[name])
+                preprocessor = self.preprocessors[name]
+                # TODO: consider adding an adapt progress bar.
+                # Sample 1 element to check the rank
+                x = next(iter(feature_dataset))
+                print("x:", x)
+                if len(x.shape) == 0:
+                    # The dataset yields unbatched scalars; batch it.
+                    feature_dataset = feature_dataset.batch(32)
+                if len(x.shape) in {0, 1}:
+                    # If the rank is 1, add a dimension
+                    # so we can reduce on axis=-1.
+                    # Note: if rank was previously 0, it is now 1.
+                    feature_dataset = feature_dataset.map(
+                        lambda x: tf.expand_dims(x, -1)
+                    )
+                preprocessor.adapt(feature_dataset)
         self._is_adapted = True
         self.get_encoded_features()  # Finish building the layer
         self.built = True
