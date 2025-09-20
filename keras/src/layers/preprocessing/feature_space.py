@@ -512,14 +512,19 @@ class FeatureSpace(Layer):
                     # call adapt() on each individual adaptable layer.
 
                     # TODO: map x[name] to iterable
-                    if isinstance(dataset, dict):
-                        feature_dataset = {k: map(lambda x: x[name], v) for k, v in dataset.items()}
-                        preprocessor = self.preprocessors[name]
-                        x = next(iter(feature_dataset.values()))
-                    else:
-                        feature_dataset = map(lambda x: x[name], dataset)
-                        preprocessor = self.preprocessors[name]
-                        x = next(iter(feature_dataset))
+#                    if isinstance(dataset, dict):
+
+                    # Going to make the assumption that, if it's not a TF-Dataset,
+                    # the input's going to be a dictionary
+#                    feature_dataset = {k: map(lambda x: x[name], v) for k, v in dataset.items()}
+
+                    preprocessor = self.preprocessors[name]
+                    x = next(iter(dataset[name]))
+                    print("get x: ", x)
+#                    else:
+#                        feature_dataset = map(lambda x: x[name], dataset)
+#                        preprocessor = self.preprocessors[name]
+#                        x = next(iter(feature_dataset))
 
                     from collections.abc import Iterable 
                     def get_iterable_shape(iterable):
@@ -529,14 +534,9 @@ class FeatureSpace(Layer):
                         shape = [len(iterable)]
                         shape.extend(get_iterable_shape(next(iterable)))
 
-                    def get_iterable_shape(iterable):
-                        shape = [len(iterable)]
-                        for elem in iterable:
-                            if isinstance(elem, Iterable):
-                                shape.append(len(elem))
-                        return shape
+                    print("shape x: ", get_iterable_shape(x))
 
-                    if len(x.shape) == 0:
+                    if len(get_iterable_shape(x)) == 0:
                         # The datasert yields unbatched scalars; batch it.
                         def _batcher(dataset, batch_size=32):
                             batch = []
@@ -548,15 +548,15 @@ class FeatureSpace(Layer):
                             if batch:
                                 yield tf.stack(batch)
 
-                        feature_dataset = _batcher(feature_dataset, batch_size=32)
-                    if len(x.shape) in {0, 1}:
+                        dataset[name] = [x for x in _batcher(dataset[name], batch_size=32)]
+                    if len(get_iterable_shape(x)) in {0, 1}:
                         # If the rank is 1, add a dimension
                         # so we can reduce on axis=-1.
                         # Note: if rank was previously 0, it is now 1.
-                        feature_dataset = map(
-                            lambda x: tf.expand_dims(x, -1), feature_dataset
+                        dataset[name] = map(
+                            lambda x: tf.expand_dims(x, -1), dataset[name]
                         )
-                    preprocessor.adapt(feature_dataset)
+                    preprocessor.adapt(dataset[name])
 
             except Exception as e:
 #                raise ValueError(
@@ -573,12 +573,13 @@ class FeatureSpace(Layer):
                 # and call the layer's `_adapt_function` on each batch
                 # to simulate the behavior of adapt() in a more performant fashion.
 
+                print("name: ", name)
                 feature_dataset = dataset.map(lambda x: x[name])
                 preprocessor = self.preprocessors[name]
                 # TODO: consider adding an adapt progress bar.
                 # Sample 1 element to check the rank
                 x = next(iter(feature_dataset))
-                print("x:", x)
+                print("x: ", x)
                 if len(x.shape) == 0:
                     # The dataset yields unbatched scalars; batch it.
                     feature_dataset = feature_dataset.batch(32)

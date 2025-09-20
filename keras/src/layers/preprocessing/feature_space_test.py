@@ -89,9 +89,9 @@ class FeatureSpaceTest(testing.TestCase):
             ).batch(4)
         )
         # Test unbatched adapt as generic iterable
-#        fs.adapt(
-#            self._get_train_data_dict(as_dataset=False, include_strings=False)
-#        )
+        fs.adapt(
+            self._get_train_data_dict(as_dataset=False, include_strings=False)
+        )
 
         # Test unbatched call on raw data
         data = {
